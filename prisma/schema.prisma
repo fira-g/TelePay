@@ -1,0 +1,72 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+
+datasource db {
+  provider = "postgresql"
+}
+generator client {
+  provider = "prisma-client-js"
+}
+
+
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+}
+
+
+model Merchant {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  createdAt DateTime @default(now())
+
+  payments  Payment[]
+  apiKeys   ApiKey[]
+}
+
+model ApiKey {
+  id          String   @id @default(uuid())
+  prefix      String   @unique
+  secretHash  String
+  merchantId  String
+  merchant    Merchant @relation(fields: [merchantId], references: [id])
+
+  createdAt   DateTime @default(now())
+  revoked     Boolean  @default(false)
+}
+
+
+model Payment {
+  id            String   @id @default(uuid())
+  merchantId    String
+  merchant      Merchant @relation(fields: [merchantId], references: [id])
+
+  amount        Int
+  currency      String
+
+  status        PaymentStatus @default(PENDING)
+
+  providerRef   String?   // reference from provider callback
+  idempotencyKey  String
+  failureReason String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([merchantId, idempotencyKey])
+}
+
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
