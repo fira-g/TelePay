@@ -7,6 +7,6 @@ import {
 const router = express.Router();
 
 router.post("/signup", signup);
-router.post("/new/:merchantId", generateNewApiKey);
+router.post("/new/:merchantId", validateApiKey, generateNewApiKey);
 
 export default router;

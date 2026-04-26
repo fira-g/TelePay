@@ -4,11 +4,12 @@ import {
   initiatePayment,
   mockProviderCallback,
 } from "../controllers/payment.controllers.js";
+import { validateApiKey } from "../controllers/merchant.controller.js";
 
 const routes = express.Router();
 
-routes.post("/initiate/:merchantId", initiatePayment);
+routes.post("/initiate/:merchantId", validateApiKey, initiatePayment);
 routes.post("/mock-provider-callback", mockProviderCallback);
-routes.get("/:id", getPayment);
+routes.get("/:merchantId/:id", validateApiKey, getPayment);
 
 export default routes;

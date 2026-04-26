@@ -70,28 +70,28 @@ export const initiatePayment = async (req, res) => {
         });
         
     } catch (error) {
-        if(error.code == "P2002"){
+        if(error.code === "P2002"){
             console.log("Race condition detected, fetching existing payment");
 
-      const { merchantId } = req.body;
-      const idempotencyKey = req.headers["idempotency-key"];
+            const { merchantId } = req.params;
+            const idempotencyKey = req.headers["x-idempotency-key"];
 
-      const existingPayment = await prisma.payment.findUnique({
-        where: {
-          merchantId_idempotencyKey: {
-            merchantId,
-            idempotencyKey
-          }
-        }
-      });
+            const existingPayment = await prisma.payment.findUnique({
+                where: {
+                    merchantId_idempotencyKey: {
+                        merchantId,
+                        idempotencyKey
+                    }
+                }
+            });
 
-      return res.json({
+            return res.json({
         paymentId: existingPayment.id,
         status: existingPayment.status
       });
         }
-        return res.status(500).json({message: "Internal server error"})
         console.log(error)
+        return res.status(500).json({message: "Internal server error"})
     }
 };
 

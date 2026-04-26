@@ -5,11 +5,11 @@ export const transitionPayment = (payment, nextState) => {
   const allowedTransitions = transitions[currentState];
 
   if (!allowedTransitions) {
-    throw new Error("Invalid State");
+    throw new Error(`Invalid State : ${currentState}`);
   }
 
   if (!allowedTransitions.includes(nextState)) {
-    throw new Error("Invalid Transition");
+    throw new Error(`${nextState} is not a valid transition from ${currentState}`);
   }
 
   return nextState;

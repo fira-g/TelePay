@@ -23,47 +23,48 @@ export const signup = async (req, res) => {
   try {
     const { email, name } = req.body;
     const existingUser = await prisma.merchant.findUnique({ where: { email } });
-    if (existingUser)
-      res.status(400).json({ message: "Merchant already exists" });
+    if (existingUser) return res.status(400).json({ message: "Merchant already exists" });
     const newMerchant = await prisma.merchant.create({
       data: { email, name },
     });
 
     const apiKey = await generateKey(newMerchant.id);
-    res.status(201).json({ apiKey: apiKey, merchantId:newMerchant.id });
+    return res.status(201).json({ apiKey: apiKey, merchantId:newMerchant.id });
   } catch (error) {
     console.log(error);
-    res.status(500).json({ message: error.message });
+    return res.status(500).json({ message: error.message });
   }
 };
 
 export const generateNewApiKey = async (req, res) => {
   try {
-    const { merchantId } = req.params;
-    const oldApiKey = req.headers["x-api-key"];
+    const newApiKey = await generateKey(req.merchantId);
+    res.status(201).json({ apiKey: newApiKey });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
-    if (!oldApiKey) {
+
+export const validateApiKey = async (req, res, next) => {
+  try {
+    const apiKey = req.headers["x-api-key"];
+    const {merchantId} = req.params;
+
+    if (!apiKey) {
       return res.status(401).json({ message: "API key is required" });
     }
-    const [prefix, secret] = oldApiKey.split(".");
+    const [prefix, secret] = apiKey.split(".");
     const keyRecord = await prisma.apiKey.findUnique({
-      where: { prefix },
+      where: { prefix,merchantId },
     });
-    console.log(keyRecord);
     if (!keyRecord || keyRecord.revoked)
       return res.status(403).json({ message: "Invalid API key" });
-
     const isSecretValid = await bcrypt.compare(secret, keyRecord.secretHash);
     if (!isSecretValid)
       return res.status(403).json({ message: "Invalid Secret" });
-    const revokedKey = await prisma.apiKey.update({
-      where: { id: keyRecord.id },
-      data: {
-        revoked: true,
-      },
-    });
-    const newApiKey = await generateKey(merchantId);
-    res.status(201).json({ apiKey: newApiKey });
+    req.merchantId = merchantId;
+    next();
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

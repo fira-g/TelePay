@@ -1,3 +1,7 @@
+import axios from "axios";
+import { BASE_URL } from "../config/env.js";
+
+
 function fakeProviderCharge(payment) {
   const providerRef = "tx_" + Math.floor(Math.random() * 100000);
   const outcome = Math.random();
