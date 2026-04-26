@@ -1,39 +1,9 @@
 import axios from 'axios'
 import { prisma } from '../config/db.js';
+import {transitionPayment} from '../services/paymentStateMachine.js';
+import { paymentStates } from '../services/paymentStates.js';
+import { fakeProviderCharge } from '../services/fakeProvider.js';
 const baseUrl = "http://localhost:3000";
-
-function fakeProviderCharge(payment) {
-  const outcome = Math.random();
-
-  let status;
-  if (outcome < 0.4) status = "SUCCESS";
-  else if (outcome < 0.7) status = "FAILED";
-  else status = "TIMEOUT";
-
-  const providerRef = "tx_" + Math.floor(Math.random() * 100000);
-
-  setTimeout(async () => {
-    try {
-      await axios.post(`${baseUrl}/payments/mock-provider-callback`, {
-        paymentId: payment.id,
-        status: status === "TIMEOUT" ? "SUCCESS" : status,
-        providerRef
-      });
-      console.log("Callback sent:", payment.id, status);
-    } catch (err) {
-      console.log("Callback failed");
-    }
-  }, Math.random() * 5000);
-
-    if (status === "TIMEOUT") {
-        return null;
-    }
-
-    return {
-        status,
-        providerRef
-    };
-    }
 
 
 export const initiatePayment = async (req, res) => {
@@ -78,7 +48,7 @@ export const initiatePayment = async (req, res) => {
                 amount,
                 currency,
                 merchantId,
-                status: "PENDING",
+                status: paymentStates.INITIATED,
                 idempotencyKey
             }
         });
@@ -101,7 +71,7 @@ export const initiatePayment = async (req, res) => {
         
     } catch (error) {
         if(error.code == "P2002"){
-            console.log("⚠️ Race condition detected, fetching existing payment");
+            console.log("Race condition detected, fetching existing payment");
 
       const { merchantId } = req.body;
       const idempotencyKey = req.headers["idempotency-key"];
@@ -135,20 +105,21 @@ export const mockProviderCallback = async (req, res) => {
         if(!payment){
             return res.status(404).json({message: "Payment not found"})
         }
-        if(payment.status == "  SUCCESS" || payment.status == "FAILED"){
-            return res.status(400).json({message: "Payment already processed"})
+        let nextState;
+        try {
+              nextState = transitionPayment(payment, status);
+        } catch (error) {
+            return res.status(400).json({message: error.message})
         }
-        if(payment.status =="PENDING" && (status == "SUCCESS" || status == "FAILED")  ){
-            await prisma.payment.update({
-                where: { id: paymentId },
-                data: {
-                    status: status === "SUCCESS" ? "SUCCESS" : "FAILED",
-                    providerRef
+
+        await prisma.payment.update({
+            where: { id: paymentId },
+            data: {
+                status: nextState,
+                providerRef
             }
         });
         return res.json({message: "Payment updated successfully"});
-    }
-    return res.status(400).json({message:"Invalid transition"})
     } catch (error) {
         console.log(error)
         return res.status(500).json({message:"Internal server error"})
