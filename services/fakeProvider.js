@@ -20,7 +20,7 @@ function fakeProviderCharge(payment) {
 
   // SUCCESS FLOW
 
-  // Step 1: AUTHORIZED
+  // AUTHORIZED
   setTimeout(async () => {
     await sendCallback(payment.id, "AUTHORIZED", providerRef);
 
@@ -31,23 +31,13 @@ function fakeProviderCharge(payment) {
 
   }, randomDelay());
 
-  // Step 2: SETTLED (delayed)
-  setTimeout(async () => {
-    await sendCallback(payment.id, "SETTLED", providerRef);
-
-    // simulate duplicate SETTLED
-    if (Math.random() < 0.2) {
-      await sendCallback(payment.id, "SETTLED", providerRef);
-    }
-
-  }, randomDelay(3000, 7000));
 
   return { providerRef };
 }
 
 async function sendCallback(paymentId, status, providerRef) {
   try {
-    await axios.post(`${baseUrl}/payments/mock-provider-callback`, {
+    await axios.post(`${BASE_URL}/payments/mock-provider-callback`, {
       paymentId,
       status,
       providerRef

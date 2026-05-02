@@ -8,14 +8,11 @@ export const transitions = {
   ],
   [paymentStates.AUTHORIZED]: [
     paymentStates.SETTLED,
-    paymentStates.FAILED
-  ],
-  [paymentStates.SETTLED]: [
     paymentStates.REFUND_PENDING
   ],
+  [paymentStates.SETTLED]: [],
   [paymentStates.REFUND_PENDING]: [
-    paymentStates.REFUNDED,
-    paymentStates.FAILED
+    paymentStates.REFUNDED
   ],
   [paymentStates.REFUNDED]: [],
   [paymentStates.FAILED]: [],

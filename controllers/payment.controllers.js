@@ -3,8 +3,8 @@ import { prisma } from '../config/db.js';
 import {transitionPayment} from '../services/paymentStateMachine.js';
 import { paymentStates } from '../services/paymentStates.js';
 import { fakeProviderCharge } from '../services/fakeProvider.js';
-const baseUrl = "http://localhost:3000";
-
+import { creditMerchant } from '../services/merchantServices.js';
+import { refundPayment } from '../services/refundService.js';
 
 export const initiatePayment = async (req, res) => {
     try {
@@ -95,38 +95,89 @@ export const initiatePayment = async (req, res) => {
     }
 };
 
+
 export const mockProviderCallback = async (req, res) => {
     try {
-        const {status, providerRef, paymentId} = req.body;
-        if(!status || !providerRef || !paymentId){
-            return res.status(400).json({message: "All fields are required"})
-        }
-        const payment = await prisma.payment.findUnique({where: {id: paymentId}});
-        if(!payment){
-            return res.status(404).json({message: "Payment not found"})
-        }
-        let nextState;
-        try {
-              nextState = transitionPayment(payment, status);
-        } catch (error) {
-            return res.status(400).json({message: error.message})
+        const { status, providerRef, paymentId } = req.body;
+
+        if (!status || !providerRef || !paymentId) {
+            return res.status(400).json({ message: "All fields are required" });
         }
 
-        await prisma.payment.update({
+        const payment = await prisma.payment.findUnique({
+            where: { id: paymentId }
+        });
+
+        if (!payment) {
+            return res.status(404).json({ message: "Payment not found" });
+        }
+
+        let nextState;
+        try {
+            nextState = transitionPayment(payment, status);
+        } catch (error) {
+            return res.status(400).json({ message: error.message });
+        }
+
+        //update to AUTHORIZED(or FAILED)
+        const updatedPayment = await prisma.payment.update({
             where: { id: paymentId },
             data: {
                 status: nextState,
                 providerRef
             }
         });
-        return res.json({message: "Payment updated successfully"});
+
+        // Only continue Saga if provider SUCCESS
+        if (nextState === paymentStates.AUTHORIZED) {
+            try {
+                // try to credit merchant
+                await creditMerchant(updatedPayment);
+
+                // move to SETTLED
+                await prisma.payment.update({
+                    where: { id: paymentId },
+                    data: {
+                        status: paymentStates.SETTLED
+                    }
+                });
+
+                console.log("Payment settled");
+
+            } catch (err) {
+                console.log("Merchant credit failed - triggering compensation");
+
+                // move to REFUND_PENDING
+                await prisma.payment.update({
+                    where: { id: paymentId },
+                    data: {
+                        status: paymentStates.REFUND_PENDING
+                    }
+                });
+
+                //compensate (refund)
+                const refundResult = await refundPayment(updatedPayment);
+
+                if (refundResult === "SUCCESS") {
+                    await prisma.payment.update({
+                        where: { id: paymentId },
+                        data: {
+                            status: paymentStates.REFUNDED
+                        }
+                    });
+
+                    console.log("Payment refunded");
+                }
+            }
+        }
+
+        return res.json({ message: "Callback processed with saga" });
+
     } catch (error) {
-        console.log(error)
-        return res.status(500).json({message:"Internal server error"})
-        
+        console.log(error);
+        return res.status(500).json({ message: "Internal server error" });
     }
 };
-
 export const getPayment = async (req, res) => {
     try {
         const {id} = req.params;
