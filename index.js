@@ -1,8 +1,20 @@
 import express from "express";
 import dotenv from "dotenv";
 import paymentRoutes from "./routes/payment.routes.js";
+import { redis } from "./config/redis.js";
+
+
 
 dotenv.config();
+
+async function testRedis() {
+  await redis.set("test", "telepay");
+  const value = await redis.get("test");
+
+  console.log("Redis value:", value);
+}
+
+testRedis();
 
 import merchantRoutes from "./routes/merchant.routes.js";
 import { PORT } from "./config/env.js";

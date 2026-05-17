@@ -2,6 +2,7 @@ import express from "express";
 import {
   generateNewApiKey,
   signup,
+  validateApiKey,
 } from "../controllers/merchant.controller.js";
 
 const router = express.Router();

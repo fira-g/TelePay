@@ -5,6 +5,7 @@ import { paymentStates } from '../services/paymentStates.js';
 import { fakeProviderCharge } from '../services/fakeProvider.js';
 import { creditMerchant } from '../services/merchantServices.js';
 import { refundPayment } from '../services/refundService.js';
+import { redis } from '../config/redis.js';
 
 export const initiatePayment = async (req, res) => {
     try {
@@ -23,6 +24,13 @@ export const initiatePayment = async (req, res) => {
         if(!idempotencyKey){
             return res.status(400).json({message: "Idempotency key is required"})
         }
+
+        const redisKey = `idem:${merchantId}:${idempotencyKey}`
+        const cachedPayement = await redis.get(redisKey);
+        if(cachedPayement){
+            console.log("Payment already exists - idempotencyKey detected")
+            return res.json(JSON.parse(cachedPayement));
+        }
         
         const existingPayment = await prisma.payment.findUnique({
             where:{
@@ -34,11 +42,18 @@ export const initiatePayment = async (req, res) => {
         })
         if(existingPayment){
             console.log("Payment already exists - idempotencyKey detected")
-            return res.json({
+            const response = {
                 paymentId: existingPayment.id,
                 status: existingPayment.status,
                 message : "Payment already exists"
-            })
+            }
+            await redis.set(
+        redisKey,
+        JSON.stringify(response),
+        "EX",
+        60 * 60 * 24 // 24 hours
+    );
+            return res.json(response)
         }
 
         
@@ -52,6 +67,19 @@ export const initiatePayment = async (req, res) => {
                 idempotencyKey
             }
         });
+        const response = {
+            paymentId: payment.id,
+            status: payment.status
+        };
+
+        await redis.set(
+            redisKey,
+            JSON.stringify(response),
+            "EX",
+            60 * 60 * 24
+        );
+
+res.json(response);
 
         console.log(payment)
         const  providerResponse = fakeProviderCharge(payment);
@@ -85,10 +113,19 @@ export const initiatePayment = async (req, res) => {
                 }
             });
 
-            return res.json({
-        paymentId: existingPayment.id,
-        status: existingPayment.status
-      });
+            const response = {
+                paymentId: existingPayment.id,
+                status: existingPayment.status
+            };
+
+            await redis.set(
+                redisKey,
+                JSON.stringify(response),
+                "EX",
+                60 * 60 * 24
+            );
+
+            return res.json(response);
         }
         console.log(error)
         return res.status(500).json({message: "Internal server error"})
