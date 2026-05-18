@@ -6,6 +6,26 @@ import { fakeProviderCharge } from '../services/fakeProvider.js';
 import { creditMerchant } from '../services/merchantServices.js';
 import { refundPayment } from '../services/refundService.js';
 import { redis } from '../config/redis.js';
+import { withPaymentLock } from '../services/withPaymentLock.js';
+import { paymentQueue } from '../queues/refundQueue.js';
+import { queueRefundJob } from '../jobs/refundJob.js';
+
+export const testQueue =
+async (req, res) => {
+
+  await paymentQueue.add(
+    "hello-job",
+
+    {
+      paymentId: "123",
+      amount: 500
+    }
+  );
+
+  return res.json({
+    message: "Job added"
+  });
+};
 
 export const initiatePayment = async (req, res) => {
     try {
@@ -132,88 +152,122 @@ res.json(response);
     }
 };
 
-
 export const mockProviderCallback = async (req, res) => {
-    try {
-        const { status, providerRef, paymentId } = req.body;
+  try {
+    const { status, providerRef, paymentId } = req.body;
 
-        if (!status || !providerRef || !paymentId) {
-            return res.status(400).json({ message: "All fields are required" });
-        }
+    if (!status || !providerRef || !paymentId) {
+      return res.status(400).json({
+        message: "All fields are required"
+      });
+    }
 
-        const payment = await prisma.payment.findUnique({
+    await withPaymentLock(
+      paymentId,
+      async () => {
+
+        const payment =
+          await prisma.payment.findUnique({
             where: { id: paymentId }
-        });
+          });
 
         if (!payment) {
-            return res.status(404).json({ message: "Payment not found" });
+          throw new Error("Payment not found");
         }
 
         let nextState;
-        try {
-            nextState = transitionPayment(payment, status);
-        } catch (error) {
-            return res.status(400).json({ message: error.message });
-        }
 
-        //update to AUTHORIZED(or FAILED)
-        const updatedPayment = await prisma.payment.update({
+        nextState = transitionPayment(
+          payment,
+          status
+        );
+
+        const updatedPayment =
+          await prisma.payment.update({
             where: { id: paymentId },
             data: {
-                status: nextState,
-                providerRef
+              status: nextState,
+              providerRef
             }
-        });
+          });
 
-        // Only continue Saga if provider SUCCESS
-        if (nextState === paymentStates.AUTHORIZED) {
-            try {
-                // try to credit merchant
-                await creditMerchant(updatedPayment);
+        if (
+          nextState ===
+          paymentStates.AUTHORIZED
+        ) {
+          try {
 
-                // move to SETTLED
-                await prisma.payment.update({
-                    where: { id: paymentId },
-                    data: {
-                        status: paymentStates.SETTLED
-                    }
-                });
+           
+            await creditMerchant(
+              updatedPayment
+            );
 
-                console.log("Payment settled");
+            await prisma.payment.update({
+              where: {
+                id: paymentId
+              },
+              data: {
+                status:
+                  paymentStates.SETTLED
+              }
+            });
 
-            } catch (err) {
-                console.log("Merchant credit failed - triggering compensation");
+            console.log(
+              "Payment settled"
+            );
 
-                // move to REFUND_PENDING
-                await prisma.payment.update({
-                    where: { id: paymentId },
-                    data: {
-                        status: paymentStates.REFUND_PENDING
-                    }
-                });
+          } catch (err) {
 
-                //compensate (refund)
-                const refundResult = await refundPayment(updatedPayment);
+            console.log(
+              "Merchant credit failed - triggering compensation"
+            );
 
-                if (refundResult === "SUCCESS") {
-                    await prisma.payment.update({
-                        where: { id: paymentId },
-                        data: {
-                            status: paymentStates.REFUNDED
-                        }
-                    });
+            await prisma.payment.update({
+              where: {
+                id: paymentId
+              },
+              data: {
+                status:
+                  paymentStates
+                    .REFUND_PENDING
+              }
+            });
 
-                    console.log("Payment refunded");
-                }
-            }
+            await queueRefundJob(paymentId)
+          }
         }
+      }
+    );
 
-        return res.json({ message: "Callback processed with saga" });
+    return res.json({
+      message:
+        "Callback processed with saga"
+    });
 
-    } catch (error) {
-        console.log(error);
-        return res.status(500).json({ message: "Internal server error" });
+  } catch (error) {
+
+    if (
+      error.message ===
+      "Payment is already being processed"
+    ) {
+      return res.status(409).json({
+        message: error.message
+      });
     }
+
+    if (
+      error.message ===
+      "Payment not found"
+    ) {
+      return res.status(404).json({
+        message: error.message
+      });
+    }
+
+    return res.status(400).json({
+      message: error.message
+    });
+  }
 };
 export const getPayment = async (req, res) => {
     try {
@@ -230,4 +284,3 @@ export const getPayment = async (req, res) => {
         return res.status(500).json({message: "Internal server error"})
     }
 };
-
